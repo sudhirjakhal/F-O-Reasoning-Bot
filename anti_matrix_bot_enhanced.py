@@ -66,7 +66,7 @@ last_trade_time = None
 min_trade_interval = 30
 strategy_start_time = None
 strategy_min_duration = 120
-min_signal_consistency = 2
+min_signal_consistency = 1
 signal_consistency_window = 120
 max_positions_per_day = 100
 daily_trades = 0
@@ -216,7 +216,7 @@ def get_current_dataframe():
     """Get current dataframe with all price action metrics for confirmation analysis"""
     global candles_dataframe
     
-    if len(candles_dataframe) < 3:  # Need at least 3 candles for confirmation
+    if len(candles_dataframe) < 2:  # Need at least 2 candles for confirmation
         logger.debug("get_current_dataframe - Insufficient candles for confirmation")
         return None
     
@@ -234,7 +234,7 @@ def get_current_dataframe():
 def confirm_next_candle_anti_matrix(df, signal, confidence, reasons):
     """Confirm signals with next candle analysis to avoid falling into traps"""
     
-    if len(df) < 3:  # Need at least 3 candles for confirmation
+    if len(df) < 2:  # Need at least 2 candles for confirmation
         return False, "Insufficient data for confirmation"
     
     current = df.iloc[-1]
