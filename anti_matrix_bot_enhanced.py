@@ -2668,6 +2668,110 @@ def log_enhanced_analysis(current_price, signal, confidence, reasons):
     
     return bigger_picture
 
+# ADD GLOBAL VARIABLES FOR SIGNAL TRACKING
+confirmed_signals = []  # Track confirmed signals
+pending_confirmation = None  # Current signal waiting for confirmation
+signal_confirmation_window = 60  # 60 seconds to confirm a signal
+
+def track_signal_confirmation(signal, confidence, reasons):
+    """Track signal confirmation status and manage signal changes"""
+    global confirmed_signals, pending_confirmation
+    
+    current_time = time.time()
+    
+    # If we have a pending confirmation, check if it's still valid
+    if pending_confirmation:
+        time_since_pending = current_time - pending_confirmation['timestamp']
+        
+        # If too much time has passed, clear pending confirmation
+        if time_since_pending > signal_confirmation_window:
+            logger.debug(f"⏰ Pending confirmation expired for {pending_confirmation['signal']}")
+            pending_confirmation = None
+        
+        # If we have a different signal, check if we should override
+        elif signal != pending_confirmation['signal']:
+            # ANTI-MATRIX: Allow stronger signals to override
+            if confidence > pending_confirmation['confidence'] + 2:
+                logger.info(f"�� Signal override: {pending_confirmation['signal']} -> {signal} (confidence: {pending_confirmation['confidence']} -> {confidence})")
+                pending_confirmation = {
+                    'signal': signal,
+                    'confidence': confidence,
+                    'reasons': reasons,
+                    'timestamp': current_time
+                }
+            else:
+                logger.debug(f"⏳ Keeping pending confirmation: {pending_confirmation['signal']} (stronger than {signal})")
+                return pending_confirmation['signal'], pending_confirmation['confidence'], pending_confirmation['reasons']
+    
+    # If no pending confirmation, create new one
+    if not pending_confirmation:
+        pending_confirmation = {
+            'signal': signal,
+            'confidence': confidence,
+            'reasons': reasons,
+            'timestamp': current_time
+        }
+        logger.info(f"⏳ New signal pending confirmation: {signal} (confidence: {confidence})")
+        return signal, confidence, reasons
+    
+    return signal, confidence, reasons
+
+def confirm_pending_signal(df):
+    """Confirm the pending signal with next candle analysis"""
+    global pending_confirmation, confirmed_signals
+    
+    if not pending_confirmation:
+        return None, 0, []
+    
+    signal = pending_confirmation['signal']
+    confidence = pending_confirmation['confidence']
+    reasons = pending_confirmation['reasons']
+    
+    # Check price confirmation
+    confirmed, confirmation_reason = confirm_next_candle_anti_matrix(df, signal, confidence, reasons)
+    
+    if confirmed:
+        # Signal confirmed - add to confirmed signals
+        confirmed_signals.append({
+            'signal': signal,
+            'confidence': confidence,
+            'reasons': reasons,
+            'confirmation_time': time.time(),
+            'confirmation_reason': confirmation_reason
+        })
+        
+        # Keep only recent confirmed signals (last 10)
+        if len(confirmed_signals) > 10:
+            confirmed_signals = confirmed_signals[-10:]
+        
+        logger.info(f"✅ Signal confirmed: {signal} - {confirmation_reason}")
+        pending_confirmation = None  # Clear pending confirmation
+        
+        return signal, confidence, reasons
+    else:
+        logger.debug(f"❌ Signal not confirmed: {signal} - {confirmation_reason}")
+        return None, 0, []
+
+def get_best_confirmed_signal():
+    """Get the best confirmed signal for trading"""
+    global confirmed_signals
+    
+    if not confirmed_signals:
+        return None, 0, []
+    
+    # Get the most recent confirmed signal
+    latest_confirmed = confirmed_signals[-1]
+    
+    # Check if it's still fresh (within last 5 minutes)
+    current_time = time.time()
+    time_since_confirmation = current_time - latest_confirmed['confirmation_time']
+    
+    if time_since_confirmation <= 300:  # 5 minutes
+        logger.debug(f"✅ Using confirmed signal: {latest_confirmed['signal']} (confirmed {time_since_confirmation:.1f}s ago)")
+        return latest_confirmed['signal'], latest_confirmed['confidence'], latest_confirmed['reasons']
+    else:
+        logger.debug(f"⏰ Confirmed signal too old: {latest_confirmed['signal']} ({time_since_confirmation:.1f}s ago)")
+        return None, 0, []
 
 #=== MAIN PROCESSING FUNCTION ===
 def process_candle_anti_matrix(candle):
@@ -2714,11 +2818,24 @@ def process_candle_anti_matrix(candle):
     
     # Generate anti-matrix signal
     signal, confidence, reasons = generate_anti_matrix_signal(df)
+
+    # TRACK SIGNAL CONFIRMATION
+    tracked_signal, tracked_confidence, tracked_reasons = track_signal_confirmation(signal, confidence, reasons)
+    
+    # CONFIRM PENDING SIGNAL
+    confirmed_signal, confirmed_confidence, confirmed_reasons = confirm_pending_signal(df)
+    
+    # GET BEST SIGNAL FOR TRADING
+    trading_signal, trading_confidence, trading_reasons = get_best_confirmed_signal()
     
     # Log analysis
     logger.info(f"=== Anti-Matrix Analysis ===")
     logger.info(f"Session Active: {session_active}")
     logger.info(f"Price: {latest['close']:.5f} | Signal: {signal} | Confidence: {confidence}")
+    logger.info(f"Tracked Signal: {tracked_signal} | Confidence: {tracked_confidence}")
+    logger.info(f"Confirmed Signal: {confirmed_signal} | Confidence: {confirmed_confidence}")
+    logger.info(f"Trading Signal: {trading_signal} | Confidence: {trading_confidence}")
+    
     logger.info(f"Reasons: {', '.join(reasons)}")
     
     # Analyze bigger picture across multiple candles (MINIMUM CHANGE)
@@ -2727,7 +2844,7 @@ def process_candle_anti_matrix(candle):
     log_enhanced_analysis(latest['close'], signal, confidence, reasons)
 
     # Execute trade only during active sessions with strategic framework
-    if signal in ["LONG", "SHORT"] and session_active and current_position is None:
+    if trading_signal in ["LONG", "SHORT"] and session_active and current_position is None:
         # Apply strategic trading framework
         should_trade, reason = should_take_trade(signal, confidence, reasons)
         
