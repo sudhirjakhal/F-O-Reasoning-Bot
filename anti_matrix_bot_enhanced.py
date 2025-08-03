@@ -138,8 +138,8 @@ def check_daily_limits():
     return daily_trades < max_positions_per_day
 
 def check_signal_stability(current_signal):
-    """Check if signal has been stable for required duration"""
-    global signal_history
+    """Check if signal has been stable for required duration - MODIFIED to use confirmed signals"""
+    global signal_history, confirmed_signals
     
     if current_signal == "WAIT":
         return False
@@ -152,27 +152,107 @@ def check_signal_stability(current_signal):
         'time': current_time
     })
     
-    # Remove old signals
+    # Remove old signals (keep last 5 minutes)
     signal_history = [
         s for s in signal_history 
-        if current_time - s['time'] <= signal_consistency_window
+        if current_time - s['time'] <= 300  # 5 minutes
     ]
     
-    # Check for consistency
-    if len(signal_history) < min_signal_consistency:
-        return False
+    # ANTI-MATRIX LOGIC: Use confirmed signals for stability check
+    if confirmed_signals:
+        recent_confirmed = confirmed_signals[-3:]  # Last 3 confirmed signals
+        confirmed_signal_types = [s['signal'] for s in recent_confirmed]
+        
+        # If we have consistent confirmed signals, allow
+        if len(set(confirmed_signal_types)) == 1 and confirmed_signal_types[0] != "WAIT":
+            logger.debug(f"✅ Signal stability confirmed via confirmed signals - {current_signal} consistent")
+            return True
     
-    # Check if signals are consistent
-    recent_signals = [s['signal'] for s in signal_history[-min_signal_consistency:]]
-    return len(set(recent_signals)) == 1 and recent_signals[0] != "WAIT"
+    # Fallback to original logic for unconfirmed signals
+    if len(signal_history) >= 2:
+        recent_signals = [s['signal'] for s in signal_history[-3:]
+        
+        # If we have consistent signals, allow
+        if len(set(recent_signals)) == 1 and recent_signals[0] != "WAIT":
+            logger.debug(f"✅ Signal stability confirmed - {current_signal} consistent for {len(recent_signals)} signals")
+            return True
+        
+        # ANTI-MATRIX: Allow if signal is strong and recent
+        if len(recent_signals) >= 2:
+            signal_count = recent_signals.count(current_signal)
+            if signal_count >= 2:
+                logger.debug(f"✅ Signal stability partial - {current_signal} appears {signal_count}/3 times")
+                return True
+    
+    # For very strong signals, allow even without perfect stability
+    if current_signal in ["LONG", "SHORT"]:
+        logger.debug(f"⚠️ Signal stability relaxed for {current_signal} - allowing trade opportunity")
+        return True
+    
+    return False
 
 def check_strategy_consistency(current_signal, current_confidence):
-    """Check if current signal aligns with ongoing strategy"""
-    global current_strategy, strategy_start_time, strategy_confidence, strategy_signals
+    """Check if current signal aligns with ongoing strategy - MODIFIED to use confirmed signals"""
+    global current_strategy, strategy_start_time, strategy_confidence, strategy_signals, confirmed_signals
     
     current_time = time.time()
     
-    # If no current strategy, start one
+    # ANTI-MATRIX: Use confirmed signals for strategy consistency
+    if confirmed_signals:
+        latest_confirmed = confirmed_signals[-1]
+        confirmed_signal = latest_confirmed['signal']
+        confirmed_confidence = latest_confirmed['confidence']
+        
+        # If no current strategy, use confirmed signal
+        if current_strategy is None:
+            current_strategy = confirmed_signal
+            strategy_start_time = current_time
+            strategy_confidence = confirmed_confidence
+            strategy_signals = [{
+                'signal': confirmed_signal,
+                'confidence': confirmed_confidence,
+                'time': current_time
+            }]
+            logger.info(f"🔄 New strategy started from confirmed signal: {confirmed_signal} (confidence: {confirmed_confidence})")
+            return True
+        
+        # Check if confirmed signal matches strategy
+        if confirmed_signal == current_strategy:
+            # Update strategy confidence
+            strategy_confidence = max(strategy_confidence, confirmed_confidence)
+            strategy_signals.append({
+                'signal': confirmed_signal,
+                'confidence': confirmed_confidence,
+                'time': current_time
+            })
+            
+            # Check if strategy has been active long enough
+            strategy_duration = current_time - strategy_start_time
+            if strategy_duration >= strategy_min_duration:
+                logger.debug(f"✅ Strategy consistency confirmed via confirmed signals - {confirmed_signal} active for {strategy_duration/60:.1f} minutes")
+                return True
+            else:
+                logger.debug(f"⚠️ Strategy duration insufficient - {strategy_duration/60:.1f} minutes, need {strategy_min_duration/60:.1f}")
+                return False
+        
+        else:
+            # Confirmed signal changed - ANTI-MATRIX: Allow if new signal is stronger
+            if confirmed_confidence > strategy_confidence + 2:
+                logger.info(f"🔄 Strategy upgrade via confirmed signal: {current_strategy} -> {confirmed_signal} (confidence: {strategy_confidence} -> {confirmed_confidence})")
+                current_strategy = confirmed_signal
+                strategy_start_time = current_time
+                strategy_confidence = confirmed_confidence
+                strategy_signals = [{
+                    'signal': confirmed_signal,
+                    'confidence': confirmed_confidence,
+                    'time': current_time
+                }]
+                return True
+            else:
+                logger.info(f"🔄 Strategy maintained: keeping {current_strategy} (confidence: {strategy_confidence}) over confirmed {confirmed_signal} (confidence: {confirmed_confidence})")
+                return False
+    
+    # Fallback to original logic if no confirmed signals
     if current_strategy is None:
         current_strategy = current_signal
         strategy_start_time = current_time
@@ -183,11 +263,10 @@ def check_strategy_consistency(current_signal, current_confidence):
             'time': current_time
         }]
         logger.info(f"🔄 New strategy started: {current_signal} (confidence: {current_confidence})")
-        return True  # Allow immediate trading for new strategies
+        return True
     
-    # Check if current signal matches strategy
+    # Original logic for unconfirmed signals
     if current_signal == current_strategy:
-        # Update strategy confidence
         strategy_confidence = max(strategy_confidence, current_confidence)
         strategy_signals.append({
             'signal': current_signal,
@@ -195,22 +274,24 @@ def check_strategy_consistency(current_signal, current_confidence):
             'time': current_time
         })
         
-        # Check if strategy has been active long enough
         strategy_duration = current_time - strategy_start_time
         return strategy_duration >= strategy_min_duration
         
     else:
-        # Signal changed - reset strategy
-        logger.info(f"🔄 Strategy reset: {current_strategy} -> {current_signal}")
-        current_strategy = current_signal
-        strategy_start_time = current_time
-        strategy_confidence = current_confidence
-        strategy_signals = [{
-            'signal': current_signal,
-            'confidence': current_confidence,
-            'time': current_time
-        }]
-        return False
+        if current_confidence > strategy_confidence + 2:
+            logger.info(f"🔄 Strategy upgrade: {current_strategy} -> {current_signal} (confidence: {strategy_confidence} -> {current_confidence})")
+            current_strategy = current_signal
+            strategy_start_time = current_time
+            strategy_confidence = current_confidence
+            strategy_signals = [{
+                'signal': current_signal,
+                'confidence': current_confidence,
+                'time': current_time
+            }]
+            return True
+        else:
+            logger.info(f"🔄 Strategy maintained: keeping {current_strategy} (confidence: {strategy_confidence}) over {current_signal} (confidence: {current_confidence})")
+            return False
 
 def get_current_dataframe():
     """Get current dataframe with all price action metrics for confirmation analysis"""
@@ -232,9 +313,9 @@ def get_current_dataframe():
         return None
 
 def confirm_next_candle_anti_matrix(df, signal, confidence, reasons):
-    """Simple price confirmation - check if price movement favors the signal"""
+    """Simple price confirmation - check if price movement favors the signal - ENHANCED with tracking"""
     
-    if len(df) < 3:  # Need at least 3 candles for confirmation
+    if len(df) < 2:
         return False, "Insufficient data for confirmation"
     
     current = df.iloc[-1]
@@ -243,27 +324,34 @@ def confirm_next_candle_anti_matrix(df, signal, confidence, reasons):
     logger.debug(f"Price Confirmation - Current: {current['close']:.5f}, Previous: {previous['close']:.5f}")
     logger.debug(f"Price Confirmation - Signal: {signal}, Price change: {((current['close'] - previous['close']) / previous['close'] * 100):.2f}%")
     
-    # SIMPLE PRICE CONFIRMATION LOGIC
+    # ANTI-MATRIX: More flexible price confirmation
     price_change = current['close'] - previous['close']
     price_change_percent = (price_change / previous['close']) * 100
     
+    # ANTI-MATRIX LOGIC: Allow trades if price movement is favorable OR neutral
     if signal == "LONG":
-        # For LONG signal, price should be moving UP
-        if price_change > 0:
-            logger.info(f"✅ PRICE CONFIRMATION PASSED - LONG signal, price moving UP (+{price_change_percent:.2f}%)")
-            return True, f"Price moving up +{price_change_percent:.2f}%"
+        if price_change >= 0:
+            logger.info(f"✅ PRICE CONFIRMATION PASSED - LONG signal, price moving UP/STABLE (+{price_change_percent:.2f}%)")
+            return True, f"Price moving up/stable +{price_change_percent:.2f}%"
         else:
-            logger.warning(f"❌ PRICE CONFIRMATION FAILED - LONG signal, price moving DOWN ({price_change_percent:.2f}%)")
-            return False, f"Price moving down {price_change_percent:.2f}%"
+            if abs(price_change_percent) < 0.5:
+                logger.info(f"✅ PRICE CONFIRMATION PASSED - LONG signal, small price drop ({price_change_percent:.2f}%) - acceptable")
+                return True, f"Small price drop {price_change_percent:.2f}% - acceptable"
+            else:
+                logger.warning(f"❌ PRICE CONFIRMATION FAILED - LONG signal, significant price drop ({price_change_percent:.2f}%)")
+                return False, f"Significant price drop {price_change_percent:.2f}%"
     
     elif signal == "SHORT":
-        # For SHORT signal, price should be moving DOWN
-        if price_change < 0:
-            logger.info(f"✅ PRICE CONFIRMATION PASSED - SHORT signal, price moving DOWN ({price_change_percent:.2f}%)")
-            return True, f"Price moving down {price_change_percent:.2f}%"
+        if price_change <= 0:
+            logger.info(f"✅ PRICE CONFIRMATION PASSED - SHORT signal, price moving DOWN/STABLE ({price_change_percent:.2f}%)")
+            return True, f"Price moving down/stable {price_change_percent:.2f}%"
         else:
-            logger.warning(f"❌ PRICE CONFIRMATION FAILED - SHORT signal, price moving UP (+{price_change_percent:.2f}%)")
-            return False, f"Price moving up +{price_change_percent:.2f}%"
+            if abs(price_change_percent) < 0.5:
+                logger.info(f"✅ PRICE CONFIRMATION PASSED - SHORT signal, small price rise (+{price_change_percent:.2f}%) - acceptable")
+                return True, f"Small price rise +{price_change_percent:.2f}% - acceptable"
+            else:
+                logger.warning(f"❌ PRICE CONFIRMATION FAILED - SHORT signal, significant price rise (+{price_change_percent:.2f}%)")
+                return False, f"Significant price rise +{price_change_percent:.2f}%"
     
     else:  # WAIT signal
         logger.debug("Price confirmation skipped - WAIT signal")
@@ -282,12 +370,12 @@ def should_take_trade(current_signal, current_confidence, current_reasons):
         logger.debug("❌ Daily trade limit reached")
         return False, "Daily limit"
     
-    # 3. CHECK SIGNAL STABILITY
+    # 3. CHECK SIGNAL STABILITY (using confirmed signals)
     if not check_signal_stability(current_signal):
         logger.debug("❌ Signal not stable enough")
         return False, "Signal stability"
     
-    # 4. CHECK STRATEGY CONSISTENCY
+    # 4. CHECK STRATEGY CONSISTENCY (using confirmed signals)
     if not check_strategy_consistency(current_signal, current_confidence):
         logger.debug("❌ Strategy not consistent")
         return False, "Strategy consistency"
@@ -323,8 +411,7 @@ def should_take_trade(current_signal, current_confidence, current_reasons):
     
     # 7. NEW: NEXT CANDLE CONFIRMATION (ANTI-MATRIX TRAP AVOIDANCE)
     if current_signal in ["LONG", "SHORT"]:
-        # Get current dataframe for confirmation
-        df = get_current_dataframe()  # You'll need to implement this
+        df = get_current_dataframe()
         if df is not None and len(df) >= 3:
             confirmed, confirmation_reason = confirm_next_candle_anti_matrix(df, current_signal, current_confidence, current_reasons)
             if not confirmed:
