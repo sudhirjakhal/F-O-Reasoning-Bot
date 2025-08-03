@@ -232,134 +232,42 @@ def get_current_dataframe():
         return None
 
 def confirm_next_candle_anti_matrix(df, signal, confidence, reasons):
-    """Confirm signals with next candle analysis to avoid falling into traps"""
+    """Simple price confirmation - check if price movement favors the signal"""
     
-    if len(df) < 2:  # Need at least 2 candles for confirmation
+    if len(df) < 3:  # Need at least 3 candles for confirmation
         return False, "Insufficient data for confirmation"
     
     current = df.iloc[-1]
     previous = df.iloc[-2]
-    pre_previous = df.iloc[-3]
     
-    # TRAP CONFIRMATION LOGIC
-    trap_confirmation = {
-        # 'ask_layering': False,
-        # 'bid_layering': False,
-        'liquidity_grab': False,
-        'stop_hunting': False,
-        'bullish_trap': False,
-        'bearish_trap': False
-    }
+    logger.debug(f"Price Confirmation - Current: {current['close']:.5f}, Previous: {previous['close']:.5f}")
+    logger.debug(f"Price Confirmation - Signal: {signal}, Price change: {((current['close'] - previous['close']) / previous['close'] * 100):.2f}%")
     
-    # # 1. ASK LAYERING CONFIRMATION (Anti-Matrix Logic)
-    # if any('ask layering' in reason.lower() for reason in reasons):
-    #     # Ask layering should lead to SHORT signal
-    #     # But we need to confirm it's not a fake pump
-    #     if signal == "SHORT":
-    #         # Check if price actually went up (trap working)
-    #         if current['high'] > previous['high']:
-    #             # Price went up as expected in ask layering trap
-    #             trap_confirmation['ask_layering'] = True
-    #             logger.info(f"✅ ASK LAYERING CONFIRMED - Price went up as expected in trap")
-    #         else:
-    #             # Price didn't go up - might be fake pattern
-    #             logger.warning(f"⚠️ ASK LAYERING WARNING - Price didn't move up as expected")
-    #             return False, "Ask layering not confirmed"
+    # SIMPLE PRICE CONFIRMATION LOGIC
+    price_change = current['close'] - previous['close']
+    price_change_percent = (price_change / previous['close']) * 100
     
-    # # 2. BID LAYERING CONFIRMATION (Anti-Matrix Logic)
-    # if any('bid layering' in reason.lower() for reason in reasons):
-    #     # Bid layering should lead to LONG signal
-    #     # But we need to confirm it's not a fake dump
-    #     if signal == "LONG":
-    #         # Check if price actually went down (trap working)
-    #         if current['low'] < previous['low']:
-    #             # Price went down as expected in bid layering trap
-    #             trap_confirmation['bid_layering'] = True
-    #             logger.info(f"✅ BID LAYERING CONFIRMED - Price went down as expected in trap")
-    #         else:
-    #             # Price didn't go down - might be fake pattern
-    #             logger.warning(f"⚠️ BID LAYERING WARNING - Price didn't move down as expected")
-    #             return False, "Bid layering not confirmed"
-    
-    # 3. LIQUIDITY GRAB CONFIRMATION
-    if any('liquidity grab' in reason.lower() for reason in reasons):
-        # Liquidity grab should show price movement in opposite direction
-        if signal == "SHORT":
-            # Should see price spike up then reverse
-            if current['high'] > previous['high'] and current['close'] < previous['close']:
-                trap_confirmation['liquidity_grab'] = True
-                logger.info(f"✅ LIQUIDITY GRAB CONFIRMED - Price spiked then reversed")
-            else:
-                logger.warning(f"⚠️ LIQUIDITY GRAB WARNING - No spike and reverse pattern")
-                return False, "Liquidity grab not confirmed"
-    
-    # 4. STOP HUNTING CONFIRMATION
-    if any('stop hunting' in reason.lower() for reason in reasons):
-        # Stop hunting should show price moving beyond key levels then reversing
-        if signal == "LONG":
-            # Should see price break below support then bounce
-            if current['low'] < previous['low'] and current['close'] > previous['close']:
-                trap_confirmation['stop_hunting'] = True
-                logger.info(f"✅ STOP HUNTING CONFIRMED - Price broke support then bounced")
-            else:
-                logger.warning(f"⚠️ STOP HUNTING WARNING - No break and bounce pattern")
-                return False, "Stop hunting not confirmed"
-    
-    # 5. BULLISH/BEARISH TRAP CONFIRMATION
-    if any('bullish trap' in reason.lower() for reason in reasons):
-        # Bullish trap should show price going up then reversing
-        if signal == "SHORT":
-            if current['high'] > previous['high'] and current['close'] < previous['close']:
-                trap_confirmation['bullish_trap'] = True
-                logger.info(f"✅ BULLISH TRAP CONFIRMED - Price went up then reversed")
-            else:
-                logger.warning(f"⚠️ BULLISH TRAP WARNING - No up then reverse pattern")
-                return False, "Bullish trap not confirmed"
-    
-    if any('bearish trap' in reason.lower() for reason in reasons):
-        # Bearish trap should show price going down then reversing
-        if signal == "LONG":
-            if current['low'] < previous['low'] and current['close'] > previous['close']:
-                trap_confirmation['bearish_trap'] = True
-                logger.info(f"✅ BEARISH TRAP CONFIRMED - Price went down then reversed")
-            else:
-                logger.warning(f"⚠️ BEARISH TRAP WARNING - No down then reverse pattern")
-                return False, "Bearish trap not confirmed"
-    
-    # 6. VOLUME CONFIRMATION
-    volume_confirmed = False
-    if any('volume:' in reason.lower() for reason in reasons):
-        avg_volume = df['volume'].rolling(window=10).mean().iloc[-1]
-        if current['volume'] > avg_volume * 1.2:
-            volume_confirmed = True
-            logger.info(f"✅ VOLUME CONFIRMED - High volume supports pattern")
-        else:
-            logger.warning(f"⚠️ VOLUME WARNING - Low volume doesn't support pattern")
-            return False, "Volume not confirmed"
-    
-    # 7. MOMENTUM CONFIRMATION
-    momentum_confirmed = False
     if signal == "LONG":
-        if current['close'] > previous['close'] and current['close'] > current['open']:
-            momentum_confirmed = True
-            logger.info(f"✅ MOMENTUM CONFIRMED - Price moving up as expected")
+        # For LONG signal, price should be moving UP
+        if price_change > 0:
+            logger.info(f"✅ PRICE CONFIRMATION PASSED - LONG signal, price moving UP (+{price_change_percent:.2f}%)")
+            return True, f"Price moving up +{price_change_percent:.2f}%"
+        else:
+            logger.warning(f"❌ PRICE CONFIRMATION FAILED - LONG signal, price moving DOWN ({price_change_percent:.2f}%)")
+            return False, f"Price moving down {price_change_percent:.2f}%"
+    
     elif signal == "SHORT":
-        if current['close'] < previous['close'] and current['close'] < current['open']:
-            momentum_confirmed = True
-            logger.info(f"✅ MOMENTUM CONFIRMED - Price moving down as expected")
+        # For SHORT signal, price should be moving DOWN
+        if price_change < 0:
+            logger.info(f"✅ PRICE CONFIRMATION PASSED - SHORT signal, price moving DOWN ({price_change_percent:.2f}%)")
+            return True, f"Price moving down {price_change_percent:.2f}%"
+        else:
+            logger.warning(f"❌ PRICE CONFIRMATION FAILED - SHORT signal, price moving UP (+{price_change_percent:.2f}%)")
+            return False, f"Price moving up +{price_change_percent:.2f}%"
     
-    # 8. FINAL CONFIRMATION DECISION
-    confirmed_patterns = sum(trap_confirmation.values())
-    
-    if confirmed_patterns > 0 and momentum_confirmed:
-        logger.info(f"✅ NEXT CANDLE CONFIRMATION PASSED - {confirmed_patterns} patterns confirmed")
-        return True, f"{confirmed_patterns} patterns confirmed with momentum"
-    elif confirmed_patterns > 0:
-        logger.warning(f"⚠️ PARTIAL CONFIRMATION - Patterns confirmed but momentum unclear")
-        return True, f"{confirmed_patterns} patterns confirmed but momentum unclear"
-    else:
-        logger.error(f"❌ NO CONFIRMATION - Patterns not playing out as expected")
-        return False, "No patterns confirmed"
+    else:  # WAIT signal
+        logger.debug("Price confirmation skipped - WAIT signal")
+        return True, "WAIT signal - no confirmation needed"
 
 def should_take_trade(current_signal, current_confidence, current_reasons):
     """Determine if we should take a trade based on strategic framework"""
