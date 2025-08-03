@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 #=== CONFIGURATION ===
 symbol = "dogeusdt"
-interval = "5m"
+interval = "1m"
 lookback = 150
 initial_equity = 100
 risk_per_trade = 0.1  # 1% risk per trade
