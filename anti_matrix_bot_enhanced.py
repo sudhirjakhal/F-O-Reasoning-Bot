@@ -243,43 +243,43 @@ def confirm_next_candle_anti_matrix(df, signal, confidence, reasons):
     
     # TRAP CONFIRMATION LOGIC
     trap_confirmation = {
-        'ask_layering': False,
-        'bid_layering': False,
+        # 'ask_layering': False,
+        # 'bid_layering': False,
         'liquidity_grab': False,
         'stop_hunting': False,
         'bullish_trap': False,
         'bearish_trap': False
     }
     
-    # 1. ASK LAYERING CONFIRMATION (Anti-Matrix Logic)
-    if any('ask layering' in reason.lower() for reason in reasons):
-        # Ask layering should lead to SHORT signal
-        # But we need to confirm it's not a fake pump
-        if signal == "SHORT":
-            # Check if price actually went up (trap working)
-            if current['high'] > previous['high']:
-                # Price went up as expected in ask layering trap
-                trap_confirmation['ask_layering'] = True
-                logger.info(f"✅ ASK LAYERING CONFIRMED - Price went up as expected in trap")
-            else:
-                # Price didn't go up - might be fake pattern
-                logger.warning(f"⚠️ ASK LAYERING WARNING - Price didn't move up as expected")
-                return False, "Ask layering not confirmed"
+    # # 1. ASK LAYERING CONFIRMATION (Anti-Matrix Logic)
+    # if any('ask layering' in reason.lower() for reason in reasons):
+    #     # Ask layering should lead to SHORT signal
+    #     # But we need to confirm it's not a fake pump
+    #     if signal == "SHORT":
+    #         # Check if price actually went up (trap working)
+    #         if current['high'] > previous['high']:
+    #             # Price went up as expected in ask layering trap
+    #             trap_confirmation['ask_layering'] = True
+    #             logger.info(f"✅ ASK LAYERING CONFIRMED - Price went up as expected in trap")
+    #         else:
+    #             # Price didn't go up - might be fake pattern
+    #             logger.warning(f"⚠️ ASK LAYERING WARNING - Price didn't move up as expected")
+    #             return False, "Ask layering not confirmed"
     
-    # 2. BID LAYERING CONFIRMATION (Anti-Matrix Logic)
-    if any('bid layering' in reason.lower() for reason in reasons):
-        # Bid layering should lead to LONG signal
-        # But we need to confirm it's not a fake dump
-        if signal == "LONG":
-            # Check if price actually went down (trap working)
-            if current['low'] < previous['low']:
-                # Price went down as expected in bid layering trap
-                trap_confirmation['bid_layering'] = True
-                logger.info(f"✅ BID LAYERING CONFIRMED - Price went down as expected in trap")
-            else:
-                # Price didn't go down - might be fake pattern
-                logger.warning(f"⚠️ BID LAYERING WARNING - Price didn't move down as expected")
-                return False, "Bid layering not confirmed"
+    # # 2. BID LAYERING CONFIRMATION (Anti-Matrix Logic)
+    # if any('bid layering' in reason.lower() for reason in reasons):
+    #     # Bid layering should lead to LONG signal
+    #     # But we need to confirm it's not a fake dump
+    #     if signal == "LONG":
+    #         # Check if price actually went down (trap working)
+    #         if current['low'] < previous['low']:
+    #             # Price went down as expected in bid layering trap
+    #             trap_confirmation['bid_layering'] = True
+    #             logger.info(f"✅ BID LAYERING CONFIRMED - Price went down as expected in trap")
+    #         else:
+    #             # Price didn't go down - might be fake pattern
+    #             logger.warning(f"⚠️ BID LAYERING WARNING - Price didn't move down as expected")
+    #             return False, "Bid layering not confirmed"
     
     # 3. LIQUIDITY GRAB CONFIRMATION
     if any('liquidity grab' in reason.lower() for reason in reasons):
