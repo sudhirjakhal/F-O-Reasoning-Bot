@@ -1,4 +1,4 @@
-FROM python:3.10-slim
+FROM python:3.11-slim-bullseye
 
 # Install build dependencies
 RUN apt-get update && \
@@ -6,7 +6,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Create app directory
-WORKDIR /
+WORKDIR /app
 
 # Copy requirements first to leverage Docker cache
 COPY requirements.txt .
@@ -16,6 +16,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY . .
+
+# Expose the port your application listens on (e.g., for a web server)
+EXPOSE 8000
 
 # Start the app
 CMD ["python", "anti_matrix_bot_enhanced.py"]
