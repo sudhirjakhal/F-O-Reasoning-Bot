@@ -1272,7 +1272,7 @@ def calculate_adaptive_levels(signal, entry_price, df):
     """Calculate SL/TP based on F&O dynamics and market conditions"""
     if len(df) < 10:  # Increased from 5 for robustness
         logger.debug("Adaptive levels - Using default F&O levels")
-        return entry_price * 0.95, entry_price * 1.10  # Default 5% SL, 10% TP for F&O
+        return entry_price * (1 - 0.006), entry_price * (1 + 0.003)  # 0.6% SL, 0.3% TP for F&O with leverage
     
     # Calculate market volatility for dynamic SL/TP
     recent_prices = df['close'].tail(20)
@@ -1297,24 +1297,21 @@ def calculate_adaptive_levels(signal, entry_price, df):
     
     if signal == "LONG":
         # Dynamic SL based on volatility and liquidity
-        sl_distance = max(atr * 1.5, entry_price * 0.03)  # At least 3% or 1.5x ATR
-        stop_loss = max(nearest_low, entry_price - sl_distance)
+        sl_distance = entry_price * 0.006  # 0.6% for F&O with leverage
+        stop_loss = entry_price - sl_distance
         
         # Dynamic TP based on market potential
         # Check if there's strong bullish momentum
         recent_momentum = (df['close'].iloc[-1] - df['close'].iloc[-5]) / df['close'].iloc[-5]
         
         if recent_momentum > 0.02:  # Strong bullish momentum (>2%)
-            # Higher TP for strong momentum
-            tp_distance = max(entry_price * 0.15, atr * 3)  # 15% or 3x ATR
+            tp_distance = entry_price * 0.005  # 0.5% for strong momentum
             logger.debug(f"Strong bullish momentum detected: {recent_momentum:.2%} - Using higher TP")
         elif recent_momentum > 0.01:  # Moderate bullish momentum (>1%)
-            # Medium TP
-            tp_distance = max(entry_price * 0.12, atr * 2.5)  # 12% or 2.5x ATR
+            tp_distance = entry_price * 0.004  # 0.4% for moderate momentum
             logger.debug(f"Moderate bullish momentum detected: {recent_momentum:.2%} - Using medium TP")
         else:
-            # Standard TP
-            tp_distance = max(entry_price * 0.10, atr * 2)  # 10% or 2x ATR
+            tp_distance = entry_price * 0.003  # 0.3% for standard momentum
             logger.debug(f"Standard momentum: {recent_momentum:.2%} - Using standard TP")
                 
         take_profit = entry_price + tp_distance
@@ -1329,24 +1326,21 @@ def calculate_adaptive_levels(signal, entry_price, df):
         
     else:  # SHORT
         # Dynamic SL based on volatility and liquidity
-        sl_distance = max(atr * 1.5, entry_price * 0.03)  # At least 3% or 1.5x ATR
-        stop_loss = min(nearest_high, entry_price + sl_distance)
+        sl_distance = entry_price * 0.006  # 0.6% for F&O with leverage
+        stop_loss = entry_price + sl_distance
         
         # Dynamic TP based on market potential
         # Check if there's strong bearish momentum
         recent_momentum = (df['close'].iloc[-5] - df['close'].iloc[-1]) / df['close'].iloc[-5]
         
         if recent_momentum > 0.02:  # Strong bearish momentum (>2%)
-            # Higher TP for strong momentum
-            tp_distance = max(entry_price * 0.15, atr * 3)  # 15% or 3x ATR
+            tp_distance = entry_price * 0.005  # 0.5% for strong momentum
             logger.debug(f"Strong bearish momentum detected: {recent_momentum:.2%} - Using higher TP")
         elif recent_momentum > 0.01:  # Moderate bearish momentum (>1%)
-            # Medium TP
-            tp_distance = max(entry_price * 0.12, atr * 2.5)  # 12% or 2.5x ATR
+            tp_distance = entry_price * 0.004  # 0.4% for moderate momentum
             logger.debug(f"Moderate bearish momentum detected: {recent_momentum:.2%} - Using medium TP")
         else:
-            # Standard TP
-            tp_distance = max(entry_price * 0.10, atr * 2)  # 10% or 2x ATR
+            tp_distance = entry_price * 0.003  # 0.3% for standard momentum
             logger.debug(f"Standard momentum: {recent_momentum:.2%} - Using standard TP")
         
         take_profit = entry_price - tp_distance
@@ -2921,7 +2915,7 @@ def process_candle_anti_matrix(candle):
     logger.info(f"Price: {latest['close']:.5f} | Signal: {signal} | Confidence: {confidence}")
     logger.info(f"Tracked Signal: {tracked_signal} | Confidence: {tracked_confidence}")
     logger.info(f"Confirmed Signal: {confirmed_signal} | Confidence: {confirmed_confidence}")
-    logger.info(f"Trading Signal: {trading_signal} | Confidence: {trading_confidence}")
+    logger.info(f"Trading Signal: {trading_signal} | Confidence: {trading_confidence} | Reasons: {trading_reasons}")
     
     logger.info(f"Reasons: {', '.join(reasons)}")
     
@@ -2947,8 +2941,8 @@ def process_candle_anti_matrix(candle):
             risk_amount = equity * risk_per_trade
             risk_per_share = abs(entry_price - stop_loss)
             base_position_size = risk_amount / risk_per_share
-            max_position_size = max_position_value / entry_price
-            position_size = min(base_position_size * leverage, max_position_size)
+            # For F&O: Position size is already leveraged, don't multiply again
+            position_size = min(base_position_size, max_position_value / entry_price)
             
             logger.debug(f"Position sizing - Risk amount: ${risk_amount:.2f}, Risk per share: {risk_per_share:.5f}, Position size: {position_size:.2f}")
             
