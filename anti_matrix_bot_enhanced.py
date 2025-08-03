@@ -63,11 +63,11 @@ order_blocks = []
 #=== STRATEGIC TRADING FRAMEWORK ===
 signal_history = []
 last_trade_time = None
-min_trade_interval = 30
+min_trade_interval = 60
 strategy_start_time = None
-strategy_min_duration = 120
+strategy_min_duration = 600
 min_signal_consistency = 1
-signal_consistency_window = 120
+signal_consistency_window = 300
 max_positions_per_day = 100
 daily_trades = 0
 last_reset_date = None
