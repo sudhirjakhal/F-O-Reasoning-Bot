@@ -170,7 +170,7 @@ def check_signal_stability(current_signal):
     
     # Fallback to original logic for unconfirmed signals
     if len(signal_history) >= 2:
-        recent_signals = [s['signal'] for s in signal_history[-3:]
+        recent_signals = [s['signal'] for s in signal_history[-3:]]
         
         # If we have consistent signals, allow
         if len(set(recent_signals)) == 1 and recent_signals[0] != "WAIT":
