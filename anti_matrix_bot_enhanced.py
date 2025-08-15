@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 #=== CONFIGURATION ===
 symbol = "dogeusdt"
-interval = "15m"
+interval = "5m"
 lookback = 150
 initial_equity = 1000
 risk_per_trade = 0.1  # 1% risk per trade
@@ -359,39 +359,6 @@ def confirm_next_candle_anti_matrix(df, signal, confidence, reasons):
 
 def should_take_trade(current_signal, current_confidence, current_reasons):
     """Determine if we should take a trade based on strategic framework"""
-
-    # CHECK PRICE VOLATILITY (NEW - ADD THIS)
-    if len(candles) >= 20:  # Need at least 20 candles for volatility calculation
-        recent_prices = [candle[4] for candle in candles[-20:]]  # Close prices
-        
-        # Calculate price volatility (standard deviation of returns)
-        returns = []
-        for i in range(1, len(recent_prices)):
-            if recent_prices[i-1] != 0:
-                return_pct = (recent_prices[i] - recent_prices[i-1]) / recent_prices[i-1]
-                returns.append(abs(return_pct))
-        
-        if returns:
-            avg_return = sum(returns) / len(returns)
-            volatility = avg_return * 100  # Convert to percentage
-            
-            logger.debug(f"�� Volatility Check - Recent volatility: {volatility:.3f}%")
-            
-            # Prevent trading if volatility is too low (sideways/choppy)
-            if volatility < 0.5:  # Less than 0.5% average movement
-                logger.debug(f"❌ Trade rejected - Low volatility ({volatility:.3f}%) - market too sideways/choppy")
-                return False, f"Low volatility: {volatility:.3f}% - market too sideways/choppy"
-            
-            # Prevent trading if volatility is too high (unstable)
-            elif volatility > 3.0:  # More than 3% average movement
-                logger.debug(f"❌ Trade rejected - High volatility ({volatility:.3f}%) - market too unstable")
-                return False, f"High volatility: {volatility:.3f}% - market too unstable"
-            
-            logger.debug(f"✅ Volatility check passed: {volatility:.3f}% (optimal range)")
-        else:
-            logger.debug("⚠️ Cannot calculate volatility - insufficient data")
-    else:
-        logger.debug("⚠️ Cannot check volatility - need at least 20 candles")
     
     # 1. CHECK TRADE TIMING
     if not check_trade_timing():
