@@ -359,6 +359,39 @@ def confirm_next_candle_anti_matrix(df, signal, confidence, reasons):
 
 def should_take_trade(current_signal, current_confidence, current_reasons):
     """Determine if we should take a trade based on strategic framework"""
+
+    # CHECK PRICE VOLATILITY (NEW - ADD THIS)
+    if len(candles) >= 20:  # Need at least 20 candles for volatility calculation
+        recent_prices = [candle[4] for candle in candles[-20:]]  # Close prices
+        
+        # Calculate price volatility (standard deviation of returns)
+        returns = []
+        for i in range(1, len(recent_prices)):
+            if recent_prices[i-1] != 0:
+                return_pct = (recent_prices[i] - recent_prices[i-1]) / recent_prices[i-1]
+                returns.append(abs(return_pct))
+        
+        if returns:
+            avg_return = sum(returns) / len(returns)
+            volatility = avg_return * 100  # Convert to percentage
+            
+            logger.debug(f"�� Volatility Check - Recent volatility: {volatility:.3f}%")
+            
+            # Prevent trading if volatility is too low (sideways/choppy)
+            if volatility < 0.5:  # Less than 0.5% average movement
+                logger.debug(f"❌ Trade rejected - Low volatility ({volatility:.3f}%) - market too sideways/choppy")
+                return False, f"Low volatility: {volatility:.3f}% - market too sideways/choppy"
+            
+            # Prevent trading if volatility is too high (unstable)
+            elif volatility > 3.0:  # More than 3% average movement
+                logger.debug(f"❌ Trade rejected - High volatility ({volatility:.3f}%) - market too unstable")
+                return False, f"High volatility: {volatility:.3f}% - market too unstable"
+            
+            logger.debug(f"✅ Volatility check passed: {volatility:.3f}% (optimal range)")
+        else:
+            logger.debug("⚠️ Cannot calculate volatility - insufficient data")
+    else:
+        logger.debug("⚠️ Cannot check volatility - need at least 20 candles")
     
     # 1. CHECK TRADE TIMING
     if not check_trade_timing():
@@ -1305,13 +1338,13 @@ def calculate_adaptive_levels(signal, entry_price, df):
         recent_momentum = (df['close'].iloc[-1] - df['close'].iloc[-5]) / df['close'].iloc[-5]
         
         if recent_momentum > 0.02:  # Strong bullish momentum (>2%)
-            tp_distance = entry_price * 0.005  # 0.5% for strong momentum
+            tp_distance = entry_price * 0.025  # 2.5% for strong momentum
             logger.debug(f"Strong bullish momentum detected: {recent_momentum:.2%} - Using higher TP")
         elif recent_momentum > 0.01:  # Moderate bullish momentum (>1%)
-            tp_distance = entry_price * 0.004  # 0.4% for moderate momentum
+            tp_distance = entry_price * 0.020  # 2.0% for moderate momentum
             logger.debug(f"Moderate bullish momentum detected: {recent_momentum:.2%} - Using medium TP")
         else:
-            tp_distance = entry_price * 0.003  # 0.3% for standard momentum
+            tp_distance = entry_price * 0.015  # 1.5% for standard momentum
             logger.debug(f"Standard momentum: {recent_momentum:.2%} - Using standard TP")
                 
         take_profit = entry_price + tp_distance
@@ -1334,13 +1367,13 @@ def calculate_adaptive_levels(signal, entry_price, df):
         recent_momentum = (df['close'].iloc[-5] - df['close'].iloc[-1]) / df['close'].iloc[-5]
         
         if recent_momentum > 0.02:  # Strong bearish momentum (>2%)
-            tp_distance = entry_price * 0.005  # 0.5% for strong momentum
+            tp_distance = entry_price * 0.025  # 2.5% for strong momentum
             logger.debug(f"Strong bearish momentum detected: {recent_momentum:.2%} - Using higher TP")
         elif recent_momentum > 0.01:  # Moderate bearish momentum (>1%)
-            tp_distance = entry_price * 0.004  # 0.4% for moderate momentum
+            tp_distance = entry_price * 0.020  # 2.0% for moderate momentum
             logger.debug(f"Moderate bearish momentum detected: {recent_momentum:.2%} - Using medium TP")
         else:
-            tp_distance = entry_price * 0.003  # 0.3% for standard momentum
+            tp_distance = entry_price * 0.015  # 1.5% for standard momentum
             logger.debug(f"Standard momentum: {recent_momentum:.2%} - Using standard TP")
         
         take_profit = entry_price - tp_distance
@@ -1564,502 +1597,6 @@ def analyze_real_time_order_book():
 
 # Add global variable for tracking multi-candle reasons
 multi_candle_reasons = []  # Track reasons from last 10 candles
-
-# def analyze_bigger_picture(signal, confidence, reasons):
-#     """Analyze the bigger picture from ANTI-MATRIX perspective - what institutions are really doing vs what retail sees"""
-#     global multi_candle_reasons
-    
-#     # Add current reasons to multi-candle tracking (keep last 10 candles)
-#     multi_candle_reasons.append({
-#         'timestamp': time.time(),
-#         'signal': signal,
-#         'confidence': confidence,
-#         'reasons': reasons
-#     })
-    
-#     # Keep only last 10 candles
-#     if len(multi_candle_reasons) > 10:
-#         multi_candle_reasons = multi_candle_reasons[-10:]
-    
-#     # Analyze patterns across multiple candles
-#     all_reasons = []
-#     signal_trend = []
-#     confidence_trend = []
-    
-#     for candle_data in multi_candle_reasons:
-#         all_reasons.extend(candle_data['reasons'])
-#         signal_trend.append(candle_data['signal'])
-#         confidence_trend.append(candle_data['confidence'])
-    
-#     # ANTI-MATRIX PATTERN ANALYSIS
-#     institutional_traps = []
-#     retail_manipulation = []
-#     contrarian_signals = []
-#     liquidity_grabs = []
-#     stop_hunting = []
-    
-#     for reason in all_reasons:
-#         reason_lower = reason.lower()
-        
-#         # Institutional Traps (what looks bullish but is bearish)
-#         if any(keyword in reason_lower for keyword in ['ask layering', 'bullish trap', 'accumulation']):
-#             institutional_traps.append(reason)
-        
-#         # Retail Manipulation (what institutions do to fool retail)
-#         elif any(keyword in reason_lower for keyword in ['session manipulation', 'liquidity grab', 'stop hunting']):
-#             retail_manipulation.append(reason)
-        
-#         # Contrarian Signals (going against obvious)
-#         elif any(keyword in reason_lower for keyword in ['bearish bias', 'distribution']):
-#             contrarian_signals.append(reason)
-        
-#         # Liquidity Grabs (institutions taking retail money)
-#         elif 'liquidity grab' in reason_lower:
-#             liquidity_grabs.append(reason)
-        
-#         # Stop Hunting (institutions hunting retail stops)
-#         elif 'stop hunting' in reason_lower:
-#             stop_hunting.append(reason)
-    
-#     # ANTI-MATRIX MARKET CONTEXT
-#     institutional_agenda = "unknown"
-#     retail_trap = "unknown"
-#     anti_matrix_logic = "unknown"
-    
-#     # Determine institutional agenda
-#     if institutional_traps:
-#         if len(institutional_traps) > 2:
-#             institutional_agenda = "heavy institutional trap setting - they want retail to buy so they can dump"
-#         else:
-#             institutional_agenda = "institutional trap detected - they're setting up retail for a dump"
-    
-#     if retail_manipulation:
-#         if len(retail_manipulation) > 2:
-#             retail_trap = "heavy retail manipulation - institutions are actively fooling retail traders"
-#         else:
-#             retail_trap = "retail manipulation detected - institutions are creating false signals"
-    
-#     # Determine anti-matrix logic
-#     if signal == "SHORT":
-#         if institutional_traps:
-#             anti_matrix_logic = "going SHORT because institutions are setting bullish traps to dump on retail"
-#         elif contrarian_signals:
-#             anti_matrix_logic = "going SHORT against obvious bullish signals - anti-matrix contrarian logic"
-#         else:
-#             anti_matrix_logic = "going SHORT based on institutional bearish bias"
-    
-#     elif signal == "LONG":
-#         if institutional_traps:
-#             anti_matrix_logic = "going LONG because institutions are setting bearish traps to pump and dump"
-#         elif contrarian_signals:
-#             anti_matrix_logic = "going LONG against obvious bearish signals - anti-matrix contrarian logic"
-#         else:
-#             anti_matrix_logic = "going LONG based on institutional bullish bias"
-    
-#     else:  # WAIT
-#         anti_matrix_logic = "waiting because institutional agenda is unclear - avoiding retail traps"
-    
-#     # ANTI-MATRIX FUTURE EXPECTATIONS
-#     institutional_plan = ""
-#     retail_expectation = ""
-#     anti_matrix_prediction = ""
-    
-#     if signal == "SHORT":
-#         if institutional_traps:
-#             institutional_plan = "institutions will pump price to trap retail buyers, then dump"
-#             retail_expectation = "retail will see bullish signals and buy"
-#             anti_matrix_prediction = "we go SHORT to catch the dump after the pump"
-#         else:
-#             institutional_plan = "institutions are bearish and will push price down"
-#             retail_expectation = "retail may still be bullish"
-#             anti_matrix_prediction = "we go SHORT with institutions against retail"
-    
-#     elif signal == "LONG":
-#         if institutional_traps:
-#             institutional_plan = "institutions will dump price to trap retail sellers, then pump"
-#             retail_expectation = "retail will see bearish signals and sell"
-#             anti_matrix_prediction = "we go LONG to catch the pump after the dump"
-#         else:
-#             institutional_plan = "institutions are bullish and will push price up"
-#             retail_expectation = "retail may still be bearish"
-#             anti_matrix_prediction = "we go LONG with institutions against retail"
-    
-#     else:  # WAIT
-#         institutional_plan = "institutions are unclear, avoiding potential traps"
-#         retail_expectation = "retail may be confused"
-#         anti_matrix_prediction = "we wait for clearer institutional direction"
-    
-#     # ANTI-MATRIX ACTION RECOMMENDATIONS
-#     what_to_do = ""
-#     what_not_to_do = ""
-    
-#     if signal == "SHORT":
-#         if institutional_traps:
-#             what_to_do = "✅ GO SHORT - Institutions setting bullish traps, expect pump then dump"
-#             what_not_to_do = "❌ DON'T BUY - That's exactly what institutions want you to do"
-#         else:
-#             what_to_do = "✅ GO SHORT - Following institutional bearish bias"
-#             what_not_to_do = "❌ DON'T FIGHT INSTITUTIONS - They control the market"
-    
-#     elif signal == "LONG":
-#         if institutional_traps:
-#             what_to_do = "✅ GO LONG - Institutions setting bearish traps, expect dump then pump"
-#             what_not_to_do = "❌ DON'T SELL - That's exactly what institutions want you to do"
-#         else:
-#             what_to_do = "✅ GO LONG - Following institutional bullish bias"
-#             what_not_to_do = "❌ DON'T FIGHT INSTITUTIONS - They control the market"
-    
-#     else:  # WAIT
-#         what_to_do = "✅ STAY OUT - Institutional agenda unclear, avoid traps"
-#         what_not_to_do = "❌ DON'T FORCE TRADES - Wait for clear institutional direction"
-    
-#     # Generate anti-matrix narrative
-#     anti_matrix_narrative = f"ANTI-MATRIX ANALYSIS: "
-#     anti_matrix_narrative += f"Institutional Agenda: {institutional_agenda}. "
-#     anti_matrix_narrative += f"Retail Trap: {retail_trap}. "
-#     anti_matrix_narrative += f"Anti-Matrix Logic: {anti_matrix_logic}. "
-#     anti_matrix_narrative += f"Institutional Plan: {institutional_plan}. "
-#     anti_matrix_narrative += f"Retail Expectation: {retail_expectation}. "
-#     anti_matrix_narrative += f"Anti-Matrix Prediction: {anti_matrix_prediction}."
-    
-#     # Add confidence context
-#     if confidence >= 10:
-#         confidence_context = "Very strong anti-matrix conviction"
-#     elif confidence >= 7:
-#         confidence_context = "Strong anti-matrix conviction"
-#     elif confidence >= 5:
-#         confidence_context = "Moderate anti-matrix conviction"
-#     else:
-#         confidence_context = "Weak anti-matrix conviction"
-    
-#     logger.info(f"�� ANTI-MATRIX BIGGER PICTURE:")
-#     logger.info(f"   Signal: {signal} | Confidence: {confidence} ({confidence_context})")
-#     logger.info(f"   Institutional Agenda: {institutional_agenda}")
-#     logger.info(f"   Retail Trap: {retail_trap}")
-#     logger.info(f"   Anti-Matrix Logic: {anti_matrix_logic}")
-#     logger.info(f"   Institutional Plan: {institutional_plan}")
-#     logger.info(f"   Retail Expectation: {retail_expectation}")
-#     logger.info(f"   Anti-Matrix Prediction: {anti_matrix_prediction}")
-#     logger.info(f"   WHAT TO DO: {what_to_do}")
-#     logger.info(f"   WHAT NOT TO DO: {what_not_to_do}")
-#     logger.info(f"   Narrative: {anti_matrix_narrative}")
-    
-#     return {
-#         'signal': signal,
-#         'confidence': confidence,
-#         'institutional_agenda': institutional_agenda,
-#         'retail_trap': retail_trap,
-#         'anti_matrix_logic': anti_matrix_logic,
-#         'institutional_plan': institutional_plan,
-#         'retail_expectation': retail_expectation,
-#         'anti_matrix_prediction': anti_matrix_prediction,
-#         'what_to_do': what_to_do,
-#         'what_not_to_do': what_not_to_do,
-#         'narrative': anti_matrix_narrative,
-#         'confidence_context': confidence_context,
-#         'candles_analyzed': len(multi_candle_reasons)
-#     }
-
-# def analyze_bigger_picture(signal, confidence, reasons):
-#     """Comprehensive Anti-Matrix Analysis - Understanding the game and avoiding traps"""
-#     global multi_candle_reasons
-    
-#     # Add current reasons to multi-candle tracking
-#     multi_candle_reasons.append({
-#         'timestamp': time.time(),
-#         'signal': signal,
-#         'confidence': confidence,
-#         'reasons': reasons
-#     })
-    
-#     # Keep only last 10 candles
-#     if len(multi_candle_reasons) > 10:
-#         multi_candle_reasons = multi_candle_reasons[-10:]
-    
-#     # ANTI-MATRIX GAME ANALYSIS
-#     institutional_behavior = {}
-#     retail_psychology = {}
-#     trap_identification = {}
-#     market_dynamics = {}
-    
-#     # Analyze patterns across multiple candles
-#     all_reasons = []
-#     signal_trend = []
-#     confidence_trend = []
-    
-#     for candle_data in multi_candle_reasons:
-#         all_reasons.extend(candle_data['reasons'])
-#         signal_trend.append(candle_data['signal'])
-#         confidence_trend.append(candle_data['confidence'])
-    
-#     # COMPREHENSIVE PATTERN ANALYSIS
-#     for reason in all_reasons:
-#         reason_lower = reason.lower()
-        
-#         # Institutional Behavior Patterns
-#         if 'ask layering' in reason_lower:
-#             institutional_behavior['ask_layering'] = institutional_behavior.get('ask_layering', 0) + 1
-#             trap_identification['bullish_trap'] = trap_identification.get('bullish_trap', 0) + 1
-#         elif 'bid layering' in reason_lower:
-#             institutional_behavior['bid_layering'] = institutional_behavior.get('bid_layering', 0) + 1
-#             trap_identification['bearish_trap'] = trap_identification.get('bearish_trap', 0) + 1
-#         elif 'liquidity grab' in reason_lower:
-#             institutional_behavior['liquidity_grab'] = institutional_behavior.get('liquidity_grab', 0) + 1
-#             trap_identification['stop_hunting'] = trap_identification.get('stop_hunting', 0) + 1
-#         elif 'stop hunting' in reason_lower:
-#             institutional_behavior['stop_hunting'] = institutional_behavior.get('stop_hunting', 0) + 1
-#             trap_identification['stop_hunting'] = trap_identification.get('stop_hunting', 0) + 1
-        
-#         # Market Phase Patterns
-#         elif 'accumulation' in reason_lower:
-#             institutional_behavior['accumulation'] = institutional_behavior.get('accumulation', 0) + 1
-#             market_dynamics['institutional_buying'] = market_dynamics.get('institutional_buying', 0) + 1
-#         elif 'distribution' in reason_lower:
-#             institutional_behavior['distribution'] = institutional_behavior.get('distribution', 0) + 1
-#             market_dynamics['institutional_selling'] = market_dynamics.get('institutional_selling', 0) + 1
-        
-#         # Retail Psychology Patterns
-#         elif 'session manipulation' in reason_lower:
-#             retail_psychology['manipulation'] = retail_psychology.get('manipulation', 0) + 1
-#         elif 'volume' in reason_lower:
-#             retail_psychology['volume_reaction'] = retail_psychology.get('volume_reaction', 0) + 1
-    
-#     # ANTI-MATRIX GAME UNDERSTANDING
-#     game_phase = "unknown"
-#     institutional_agenda = "unknown"
-#     retail_trap = "unknown"
-#     anti_matrix_strategy = "unknown"
-    
-#     # Determine Game Phase
-#     if institutional_behavior.get('ask_layering', 0) > 2:
-#         game_phase = "institutional trap setting - they want retail to buy so they can dump"
-#     elif institutional_behavior.get('bid_layering', 0) > 2:
-#         game_phase = "institutional trap setting - they want retail to sell so they can pump"
-#     elif institutional_behavior.get('liquidity_grab', 0) > 2:
-#         game_phase = "institutional stop hunting - they're hunting retail stops"
-#     elif institutional_behavior.get('accumulation', 0) > 2:
-#         game_phase = "institutional accumulation - they're buying while retail is selling"
-#     elif institutional_behavior.get('distribution', 0) > 2:
-#         game_phase = "institutional distribution - they're selling while retail is buying"
-#     else:
-#         game_phase = "neutral phase - unclear institutional agenda"
-    
-#     # Determine Institutional Agenda
-#     if 'ask_layering' in game_phase:
-#         institutional_agenda = "institutions setting bullish traps to dump on retail"
-#     elif 'bid_layering' in game_phase:
-#         institutional_agenda = "institutions setting bearish traps to pump and dump"
-#     elif 'stop hunting' in game_phase:
-#         institutional_agenda = "institutions hunting retail stops for liquidity"
-#     elif 'accumulation' in game_phase:
-#         institutional_agenda = "institutions accumulating for a major move"
-#     elif 'distribution' in game_phase:
-#         institutional_agenda = "institutions distributing for a major move"
-#     else:
-#         institutional_agenda = "institutional agenda unclear"
-    
-#     # Determine Retail Trap
-#     if institutional_behavior.get('ask_layering', 0) > 2:
-#         retail_trap = "retail will see bullish signals and buy (FOMO trap)"
-#     elif institutional_behavior.get('bid_layering', 0) > 2:
-#         retail_trap = "retail will see bearish signals and sell (panic trap)"
-#     elif institutional_behavior.get('liquidity_grab', 0) > 2:
-#         retail_trap = "retail will panic sell at stops (liquidity trap)"
-#     else:
-#         retail_trap = "retail behavior unclear"
-    
-#     # ANTI-MATRIX STRATEGY
-#     if signal == "SHORT":
-#         if 'ask_layering' in game_phase:
-#             anti_matrix_strategy = "GO SHORT - Avoid bullish trap, catch the dump after pump"
-#         elif 'distribution' in game_phase:
-#             anti_matrix_strategy = "GO SHORT - Follow institutional selling, avoid retail buying"
-#         elif 'stop_hunting' in game_phase:
-#             anti_matrix_strategy = "GO SHORT - Catch institutional stop hunt"
-#         else:
-#             anti_matrix_strategy = "GO SHORT - Anti-matrix bearish bias"
-    
-#     elif signal == "LONG":
-#         if 'bid_layering' in game_phase:
-#             anti_matrix_strategy = "GO LONG - Avoid bearish trap, catch the pump after dump"
-#         elif 'accumulation' in game_phase:
-#             anti_matrix_strategy = "GO LONG - Follow institutional buying, avoid retail selling"
-#         elif 'stop_hunting' in game_phase:
-#             anti_matrix_strategy = "GO LONG - Catch institutional stop hunt"
-#         else:
-#             anti_matrix_strategy = "GO LONG - Anti-matrix bullish bias"
-    
-#     else:  # WAIT
-#         anti_matrix_strategy = "WAIT - Avoid unclear situations, preserve capital"
-    
-#     # ANTI-MATRIX PREDICTIONS
-#     institutional_plan = ""
-#     retail_expectation = ""
-#     anti_matrix_prediction = ""
-#     next_candles_expectation = ""
-    
-#     if signal == "SHORT":
-#         if 'ask_layering' in game_phase:
-#             institutional_plan = "institutions will pump price to trap retail buyers, then dump"
-#             retail_expectation = "retail will FOMO buy during the pump"
-#             anti_matrix_prediction = "we go SHORT to catch the dump after the pump"
-#             next_candles_expectation = "expect pump in next 2-5 candles, dump in 5-10 candles"
-#         elif 'distribution' in game_phase:
-#             institutional_plan = "institutions will continue selling while retail buys"
-#             retail_expectation = "retail will buy the dip and get trapped"
-#             anti_matrix_prediction = "we go SHORT with institutions against retail"
-#             next_candles_expectation = "expect continued downward pressure for 5-15 candles"
-#         elif 'stop_hunting' in game_phase:
-#             institutional_plan = "institutions will hunt retail stops downward"
-#             retail_expectation = "retail will panic sell at stops"
-#             anti_matrix_prediction = "we go SHORT to catch the stop hunt"
-#             next_candles_expectation = "expect sharp downward move in next 1-3 candles"
-#         else:
-#             institutional_plan = "institutions are bearish and will push price down"
-#             retail_expectation = "retail may still be bullish"
-#             anti_matrix_prediction = "we go SHORT with institutions against retail"
-#             next_candles_expectation = "expect gradual downward movement over 10-20 candles"
-    
-#     elif signal == "LONG":
-#         if 'bid_layering' in game_phase:
-#             institutional_plan = "institutions will dump price to trap retail sellers, then pump"
-#             retail_expectation = "retail will panic sell during the dump"
-#             anti_matrix_prediction = "we go LONG to catch the pump after the dump"
-#             next_candles_expectation = "expect dump in next 2-5 candles, pump in 5-10 candles"
-#         elif 'accumulation' in game_phase:
-#             institutional_plan = "institutions will continue buying while retail sells"
-#             retail_expectation = "retail will sell the rally and get trapped"
-#             anti_matrix_prediction = "we go LONG with institutions against retail"
-#             next_candles_expectation = "expect continued upward pressure for 5-15 candles"
-#         elif 'stop_hunting' in game_phase:
-#             institutional_plan = "institutions will hunt retail stops upward"
-#             retail_expectation = "retail will panic buy at stops"
-#             anti_matrix_prediction = "we go LONG to catch the stop hunt"
-#             next_candles_expectation = "expect sharp upward move in next 1-3 candles"
-#         else:
-#             institutional_plan = "institutions are bullish and will push price up"
-#             retail_expectation = "retail may still be bearish"
-#             anti_matrix_prediction = "we go LONG with institutions against retail"
-#             next_candles_expectation = "expect gradual upward movement over 10-20 candles"
-    
-#     else:  # WAIT
-#         institutional_plan = "institutions are unclear, avoiding potential traps"
-#         retail_expectation = "retail may be confused"
-#         anti_matrix_prediction = "we wait for clearer institutional direction"
-#         next_candles_expectation = "wait 5-10 candles for clearer signals"
-    
-#     # ANTI-MATRIX ACTION RECOMMENDATIONS
-#     what_to_do = ""
-#     what_not_to_do = ""
-#     risk_management = ""
-#     profit_strategy = ""
-    
-#     if signal == "SHORT":
-#         if 'ask_layering' in game_phase:
-#             what_to_do = "✅ GO SHORT - Avoid bullish trap, catch institutional dump"
-#             what_not_to_do = "❌ DON'T FOMO BUY - That's exactly what institutions want"
-#             risk_management = "��️ Use wider stops - expect pump before dump"
-#             profit_strategy = "💰 Target dump after pump - be patient with trap"
-#         elif 'distribution' in game_phase:
-#             what_to_do = "✅ GO SHORT - Follow institutional selling"
-#             what_not_to_do = "❌ DON'T BUY THE DIP - Institutions are selling"
-#             risk_management = "🛡️ Use standard stops - steady downward pressure"
-#             profit_strategy = "💰 Target 2-3x risk reward - distribution may continue"
-#         elif 'stop_hunting' in game_phase:
-#             what_to_do = "✅ GO SHORT - Catch institutional stop hunt"
-#             what_not_to_do = "❌ DON'T USE TIGHT STOPS - You'll get hunted"
-#             risk_management = "��️ Use wider stops - expect volatility"
-#             profit_strategy = "💰 Quick profits - stop hunt may be brief"
-#         else:
-#             what_to_do = "✅ GO SHORT - Anti-matrix bearish bias"
-#             what_not_to_do = "❌ DON'T FIGHT INSTITUTIONS - They control the market"
-#             risk_management = "🛡️ Use standard stops"
-#             profit_strategy = "💰 Target 2x risk reward"
-    
-#     elif signal == "LONG":
-#         if 'bid_layering' in game_phase:
-#             what_to_do = "✅ GO LONG - Avoid bearish trap, catch institutional pump"
-#             what_not_to_do = "❌ DON'T PANIC SELL - That's exactly what institutions want"
-#             risk_management = "��️ Use wider stops - expect dump before pump"
-#             profit_strategy = "💰 Target pump after dump - be patient with trap"
-#         elif 'accumulation' in game_phase:
-#             what_to_do = "✅ GO LONG - Follow institutional buying"
-#             what_not_to_do = "❌ DON'T SELL THE RALLY - Institutions are buying"
-#             risk_management = "🛡️ Use standard stops - steady upward pressure"
-#             profit_strategy = "💰 Target 2-3x risk reward - accumulation may continue"
-#         elif 'stop_hunting' in game_phase:
-#             what_to_do = "✅ GO LONG - Catch institutional stop hunt"
-#             what_not_to_do = "❌ DON'T USE TIGHT STOPS - You'll get hunted"
-#             risk_management = "��️ Use wider stops - expect volatility"
-#             profit_strategy = "💰 Quick profits - stop hunt may be brief"
-#         else:
-#             what_to_do = "✅ GO LONG - Anti-matrix bullish bias"
-#             what_not_to_do = "❌ DON'T FIGHT INSTITUTIONS - They control the market"
-#             risk_management = "🛡️ Use standard stops"
-#             profit_strategy = "💰 Target 2x risk reward"
-    
-#     else:  # WAIT
-#         what_to_do = "✅ STAY OUT - Avoid unclear situations, preserve capital"
-#         what_not_to_do = "❌ DON'T FORCE TRADES - Wait for clear institutional direction"
-#         risk_management = "🛡️ No position - no risk"
-#         profit_strategy = "💰 Preserve capital for better opportunities"
-    
-#     # Generate comprehensive anti-matrix narrative
-#     anti_matrix_narrative = f"ANTI-MATRIX GAME ANALYSIS: "
-#     anti_matrix_narrative += f"Game Phase: {game_phase}. "
-#     anti_matrix_narrative += f"Institutional Agenda: {institutional_agenda}. "
-#     anti_matrix_narrative += f"Retail Trap: {retail_trap}. "
-#     anti_matrix_narrative += f"Anti-Matrix Strategy: {anti_matrix_strategy}. "
-#     anti_matrix_narrative += f"Institutional Plan: {institutional_plan}. "
-#     anti_matrix_narrative += f"Retail Expectation: {retail_expectation}. "
-#     anti_matrix_narrative += f"Anti-Matrix Prediction: {anti_matrix_prediction}. "
-#     anti_matrix_narrative += f"Next Candles: {next_candles_expectation}."
-    
-#     # Add confidence context
-#     if confidence >= 12:
-#         confidence_context = "Very strong anti-matrix conviction"
-#     elif confidence >= 9:
-#         confidence_context = "Strong anti-matrix conviction"
-#     elif confidence >= 6:
-#         confidence_context = "Moderate anti-matrix conviction"
-#     else:
-#         confidence_context = "Weak anti-matrix conviction"
-    
-#     logger.info(f"�� ANTI-MATRIX BIGGER PICTURE:")
-#     logger.info(f"   Signal: {signal} | Confidence: {confidence} ({confidence_context})")
-#     logger.info(f"   Game Phase: {game_phase}")
-#     logger.info(f"   Institutional Agenda: {institutional_agenda}")
-#     logger.info(f"   Retail Trap: {retail_trap}")
-#     logger.info(f"   Anti-Matrix Strategy: {anti_matrix_strategy}")
-#     logger.info(f"   Institutional Plan: {institutional_plan}")
-#     logger.info(f"   Retail Expectation: {retail_expectation}")
-#     logger.info(f"   Anti-Matrix Prediction: {anti_matrix_prediction}")
-#     logger.info(f"   Next Candles: {next_candles_expectation}")
-#     logger.info(f"   WHAT TO DO: {what_to_do}")
-#     logger.info(f"   WHAT NOT TO DO: {what_not_to_do}")
-#     logger.info(f"   Risk Management: {risk_management}")
-#     logger.info(f"   Profit Strategy: {profit_strategy}")
-#     logger.info(f"   Narrative: {anti_matrix_narrative}")
-    
-#     return {
-#         'signal': signal,
-#         'confidence': confidence,
-#         'game_phase': game_phase,
-#         'institutional_agenda': institutional_agenda,
-#         'retail_trap': retail_trap,
-#         'anti_matrix_strategy': anti_matrix_strategy,
-#         'institutional_plan': institutional_plan,
-#         'retail_expectation': retail_expectation,
-#         'anti_matrix_prediction': anti_matrix_prediction,
-#         'next_candles_expectation': next_candles_expectation,
-#         'what_to_do': what_to_do,
-#         'what_not_to_do': what_not_to_do,
-#         'risk_management': risk_management,
-#         'profit_strategy': profit_strategy,
-#         'narrative': anti_matrix_narrative,
-#         'confidence_context': confidence_context,
-#         'candles_analyzed': len(multi_candle_reasons)
-#     }
 
 def analyze_bigger_picture(current_price, signal, confidence, reasons):
     """Independent Anti-Matrix Analysis - Creates its own signals based on comprehensive analysis with price tracking"""
@@ -3025,8 +2562,9 @@ def process_candle_anti_matrix(candle):
                 send_telegram_message(telegram_msg)
                 current_position = None
             elif current_price >= current_position['take_profit']:
-                pnl = (current_position['take_profit'] - current_position['entry']) * current_position['position_size']  # Removed double leverage
+                pnl = (current_position['take_profit'] - current_position['entry']) * current_position['position_size'] * 0.5  # Removed double leverage
                 equity += pnl
+                current_position['position_size'] *= 0.5
                 logger.info(f"🎉 TAKE PROFIT: PnL = ${pnl:.2f} | Equity = ${equity:.2f}")
                 logger.debug(f"Take profit details - Entry: {current_position['entry']:.5f}, Exit: {current_position['take_profit']:.5f}")
                 
@@ -3062,8 +2600,9 @@ def process_candle_anti_matrix(candle):
                 send_telegram_message(telegram_msg)
                 current_position = None
             elif current_price <= current_position['take_profit']:
-                pnl = (current_position['entry'] - current_position['take_profit']) * current_position['position_size']  # Removed double leverage
+                pnl = (current_position['entry'] - current_position['take_profit']) * current_position['position_size'] * 0.5  # Removed double leverage
                 equity += pnl
+                current_position['position_size'] *= 0.5
                 logger.info(f"🎉 TAKE PROFIT: PnL = ${pnl:.2f} | Equity = ${equity:.2f}")
                 logger.debug(f"Take profit details - Entry: {current_position['entry']:.5f}, Exit: {current_position['take_profit']:.5f}")
                 
